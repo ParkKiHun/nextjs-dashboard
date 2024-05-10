@@ -6,18 +6,35 @@ import { revalidatePath } from 'next/cache'; // 경로 재검증
 import { redirect } from 'next/navigation';
 
 const FormSchema = z.object({
-  id: z.string(),
+  id: z.string({
+    invalid_type_error: 'Please select a customer.',
+  }),
   customerId: z.string(),
-  amount: z.coerce.number(),
-  status: z.enum(['pending', 'paid']),
+  amount: z.coerce
+    .number()
+    .gt(0, { message: 'Please enter an amount greater than $0.' }),
+  status: z.enum(['pending', 'paid'], {
+    invalid_type_error: 'Please select an invoice status.',
+  }),
   date: z.string(),
 });
+
+// This is temporary until @types/react-dom is updated
+export type State = {
+  errors?: {
+    customerId?: string[];
+    amount?: string[];
+    status?: string[];
+  };
+  message?: string | null;
+};
 
 const CreateInvoice = FormSchema.omit({ id: true, date: true });
 const UpdateInvoice = FormSchema.omit({ id: true, date: true });
 
-export async function createInvoice(formData: FormData) {
-  const { customerId, amount, status } = CreateInvoice.parse({
+export async function createInvoice(prevState: State, formData: FormData) {
+  // Validate form fields using Zod
+  const validatedFields = CreateInvoice.safeParse({
     customerId: formData.get('customerId'),
     amount: formData.get('amount'),
     status: formData.get('status'),
@@ -25,6 +42,15 @@ export async function createInvoice(formData: FormData) {
   // Test
   //   console.log(rawFormData);
 
+  // If form validation fails, return errors early. Otherwise, continue.
+  if (!validatedFields.success) {
+    return {
+      errors: validatedFields.error.flatten().fieldErrors,
+      message: 'Missing Fields. Failed to Create Invoice.',
+    };
+  }
+
+  const { customerId, amount, status } = validatedFields.data;
   // 금액을 센트로 변환
   const amountInCents = amount * 100;
   // 생성날짜를 YYYY-MM-DD 형식으로 생성
@@ -72,11 +98,4 @@ export async function updateInvoice(id: string, formData: FormData) {
 
 export async function deleteInvoice(id: string) {
   throw new Error('Failed to Delete Invoice');
-  try {
-    await sql`DELETE FROM invoices WHERE id = ${id}`;
-    revalidatePath('/dashboard/invoices');
-    return { message: 'Deleted Invoice.' };
-  } catch (error) {
-    return { message: 'Database Error: Failed to Delete Invoice.' };
-  }
 }
